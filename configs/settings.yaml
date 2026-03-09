@@ -1,0 +1,24 @@
+# Lab Memory Configuration
+paths:
+  raw_dir: "data/raw"
+  extracted_dir: "data/extracted"
+  chroma_dir: "data/chroma_db"
+
+embedding:
+  model_name: "intfloat/multilingual-e5-large"
+  batch_size: 64
+
+chunking:
+  min_chunk_length: 100  # characters
+  max_chunk_tokens: 512
+  overlap_tokens: 50
+
+search:
+  default_top_k: 10
+  score_threshold: 0.3
+
+extraction:
+  parallel_workers: null  # null = cpu_count()
+
+mcp:
+  server_name: "lab-memory"

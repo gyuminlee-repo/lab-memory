@@ -1,0 +1,7 @@
+data/raw/
+data/extracted/
+data/chroma_db/
+*.egg-info/
+__pycache__/
+.env
+*.swp
