@@ -74,18 +74,18 @@ def chunk_pptx(data: dict, min_length: int = 100) -> list[Chunk]:
                 buffer_slides = []
                 buffer_meta = {}
             # Add current slide as its own chunk
-                chunk_id = f"{source_file}:s{slide_num}"
-                chunks.append(Chunk(
-                    text=text,
-                    metadata={
-                        "date": date,
-                        "source_file": source_file,
-                        "slide_number": slide_num,
-                        "title": slide.get("title", ""),
-                        "type": "pptx",
-                    },
-                    chunk_id=chunk_id,
-                ))
+            chunk_id = f"{source_file}:s{slide_num}"
+            chunks.append(Chunk(
+                text=text,
+                metadata={
+                    "date": date,
+                    "source_file": source_file,
+                    "slide_number": slide_num,
+                    "title": slide.get("title", ""),
+                    "type": "pptx",
+                },
+                chunk_id=chunk_id,
+            ))
 
     # Flush remaining buffer
     if buffer_parts:

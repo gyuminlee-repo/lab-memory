@@ -2,96 +2,141 @@
 
 연구실 위클리 레포트(PPT)와 논문(PDF)에서 실험 기록과 연구 지식을 검색하는 로컬 RAG 시스템.
 
+## 요구사항
+
+- Python >= 3.11
+- 디스크 ~2GB (임베딩 모델 `intfloat/multilingual-e5-large` 자동 다운로드)
+
 ## 설치
 
 ```bash
-cd lab-memory
 pip install -e .
 ```
 
-임베딩 모델(`intfloat/multilingual-e5-large`, ~1.3GB)은 첫 실행 시 자동 다운로드된다.
+## 빠른 시작
+
+```bash
+# 1. 워크스페이스 초기화
+lab-memory init ~/my-lab
+
+# 2. 원본 PPT/PDF 연결
+ln -s /path/to/weekly-reports ~/my-lab/data/raw/weekly
+ln -s /path/to/papers ~/my-lab/data/raw/papers
+
+# 3. 추출 + 인덱싱 (한 번에)
+lab-memory --home ~/my-lab ingest ~/my-lab/data/raw/
+
+# 4. 검색
+lab-memory --home ~/my-lab search "ALE 실험 조건"
+```
+
+## 복수 워크스페이스
+
+프로젝트별로 독립된 RAG를 운영할 수 있다.
+
+```bash
+# 프로젝트 A
+lab-memory init ~/lab-a
+lab-memory --home ~/lab-a ingest ~/lab-a/data/raw/
+
+# 프로젝트 B
+lab-memory init ~/lab-b
+lab-memory --home ~/lab-b ingest ~/lab-b/data/raw/
+
+# 환경변수로도 지정 가능
+export LAB_MEMORY_HOME=~/lab-a
+lab-memory search "query"
+```
+
+`--home` 미지정 시 `LAB_MEMORY_HOME` 환경변수 → 패키지 설치 디렉토리 순으로 fallback한다.
 
 ## 사용법
 
-### 1. 데이터 준비
-
-원본 PPT/PDF를 `data/raw/`에 심볼릭 링크 또는 복사:
+### 추출
 
 ```bash
-ln -s /path/to/weekly-reports data/raw/weekly
-ln -s /path/to/papers data/raw/papers
+lab-memory --home ~/my-lab extract ~/my-lab/data/raw/
+
+# 특정 경로 제외
+lab-memory --home ~/my-lab extract ~/my-lab/data/raw/ -x "backup" -x "old"
 ```
 
-### 2. 추출 + 인덱싱
+### 인덱싱
 
 ```bash
-# 일괄 실행 (추출 → 청킹 → 임베딩 → ChromaDB 저장)
-lab-memory ingest data/raw/
-
-# 개별 실행도 가능
-lab-memory extract data/raw/          # PPT/PDF → JSON
-lab-memory index                       # JSON → ChromaDB
+lab-memory --home ~/my-lab index
 ```
 
-### 3. 검색
+### 검색
 
 ```bash
 # 기본 검색
-lab-memory search "ALE 실험 조건"
+lab-memory --home ~/my-lab search "tolerance mechanism"
 
 # 옵션
-lab-memory search "tolerance mechanism" --top-k 5 --date-from 2023-01-01 --type pptx
+lab-memory --home ~/my-lab search "adaptive evolution" --top-k 5 --date-from 2023-01-01 --type pptx
 
-# Claude API로 답변 합성 (ANTHROPIC_API_KEY 환경변수 필요)
-lab-memory search "adaptive evolution 프로토콜" --synthesize
+# Claude API로 답변 합성 (ANTHROPIC_API_KEY 환경변수 필요, 선택사항)
+lab-memory --home ~/my-lab search "ALE 프로토콜" --synthesize
 ```
 
-### 4. 인덱스 통계
+### 통계
 
 ```bash
-lab-memory stats
+lab-memory --home ~/my-lab stats
 ```
 
-### 5. MCP 서버 (Claude Code 연동)
+### MCP 서버 (Claude Code 연동)
 
-프로젝트 루트의 `.mcp.json`에 등록되어 있어 Claude Code 세션에서 자동으로 사용 가능하다.
+Claude Code에서 lab-memory를 MCP 도구로 사용할 수 있다. 별도 API 키 없이 Claude 구독만으로 동작한다.
+
+프로젝트 `.mcp.json` 설정 예시:
+
+```json
+{
+  "mcpServers": {
+    "lab-memory": {
+      "command": "lab-memory",
+      "args": ["serve"],
+      "env": {
+        "LAB_MEMORY_HOME": "/absolute/path/to/workspace"
+      }
+    }
+  }
+}
+```
 
 제공 도구:
 - `search_lab_notes` — 키워드/의미 기반 검색
 - `get_slide` — 특정 슬라이드 원문 조회
-- `summarize_topic` — 주제별 종합 요약 (Claude API 사용)
+- `summarize_topic` — 주제별 소스 수집 (Claude Code가 종합)
 - `list_reports` — 레포트 목록 조회
 - `get_report_summary` — 개별 레포트 슬라이드 구성 확인
 
 수동 실행:
 ```bash
-lab-memory serve
+LAB_MEMORY_HOME=~/my-lab lab-memory serve
 ```
 
 ## 디렉토리 구조
 
 ```
-lab-memory/
-├── pyproject.toml
-├── configs/settings.yaml        # 임베딩 모델, 청킹 파라미터, 검색 설정
-├── lab_memory/
-│   ├── extract/                 # PPT/PDF → JSON 추출
-│   │   ├── pptx_extractor.py   # python-pptx, multiprocessing 병렬
-│   │   ├── pdf_extractor.py    # PyMuPDF
-│   │   └── image_describer.py  # Phase 4 (미구현)
-│   ├── index/                   # 청킹 + 임베딩 + 저장
-│   │   ├── chunker.py          # 슬라이드 단위 / 토큰 기반 청킹
-│   │   ├── embedder.py         # multilingual-e5-large
-│   │   └── store.py            # ChromaDB
-│   ├── query/                   # 검색 + 답변 합성
-│   │   ├── retriever.py        # 벡터 검색 + 메타데이터 필터
-│   │   └── synthesizer.py      # Claude API 답변 합성
-│   ├── mcp_server.py           # MCP 서버 (5개 도구)
-│   └── cli.py                  # CLI 엔트리포인트
+my-lab/                             # --home으로 지정하는 워크스페이스
+├── configs/settings.yaml           # 임베딩 모델, 청킹 파라미터, 검색 설정
 └── data/
-    ├── raw/                     # 원본 PPT/PDF (심볼릭 링크)
-    ├── extracted/               # 추출된 JSON
-    └── chroma_db/               # 벡터 DB
+    ├── raw/                        # 원본 PPT/PDF (심볼릭 링크 권장)
+    ├── extracted/                  # 추출된 JSON (자동 생성)
+    └── chroma_db/                  # 벡터 DB (자동 생성)
+
+lab-memory/                         # 패키지 (pip install)
+├── pyproject.toml
+├── lab_memory/
+│   ├── extract/                    # PPT/PDF → JSON 추출
+│   ├── index/                      # 청킹 + 임베딩 + ChromaDB 저장
+│   ├── query/                      # 검색 + 답변 합성
+│   ├── mcp_server.py               # MCP 서버
+│   └── cli.py                      # CLI 엔트리포인트
+└── configs/settings.yaml           # 기본 설정 (init 시 워크스페이스로 복사)
 ```
 
 ## 기술 스택
@@ -103,7 +148,7 @@ lab-memory/
 | 임베딩 | sentence-transformers 3.4.1 + multilingual-e5-large |
 | 벡터 DB | chromadb 0.6.3 |
 | MCP | mcp[cli] 1.8.0 |
-| LLM 합성 | anthropic 0.49.0 |
+| LLM 합성 | anthropic 0.49.0 (CLI --synthesize 전용, 선택사항) |
 | CLI | click 8.1.8 |
 
 ## 설정

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -9,26 +10,47 @@ import click
 import yaml
 
 
-def _load_config() -> dict:
+def _get_home(ctx: click.Context | None = None) -> Path:
+    """Resolve lab-memory home directory.
+
+    Priority: --home flag > LAB_MEMORY_HOME env var > package root.
+    """
+    if ctx and ctx.obj and ctx.obj.get("home"):
+        return Path(ctx.obj["home"])
+    env = os.environ.get("LAB_MEMORY_HOME")
+    if env:
+        return Path(env)
+    return Path(__file__).parent.parent
+
+
+def _load_config(home: Path) -> dict:
     """Load settings from configs/settings.yaml."""
-    config_path = Path(__file__).parent.parent / "configs" / "settings.yaml"
+    config_path = home / "configs" / "settings.yaml"
     if config_path.exists():
         with open(config_path, encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    # Fallback to package bundled config
+    pkg_config = Path(__file__).parent.parent / "configs" / "settings.yaml"
+    if pkg_config.exists():
+        with open(pkg_config, encoding="utf-8") as f:
             return yaml.safe_load(f)
     return {}
 
 
-def _resolve_path(config: dict, key: str, default: str) -> Path:
-    """Resolve a path from config relative to project root."""
-    project_root = Path(__file__).parent.parent
+def _resolve_path(home: Path, config: dict, key: str, default: str) -> Path:
+    """Resolve a path from config relative to home directory."""
     path_str = config.get("paths", {}).get(key, default)
-    return project_root / path_str
+    return home / path_str
 
 
 @click.group()
-def cli():
-    """Lab Memory - Personal research knowledge retrieval system."""
-    pass
+@click.option("--home", envvar="LAB_MEMORY_HOME", default=None,
+              type=click.Path(), help="Lab Memory home directory (default: package root or LAB_MEMORY_HOME)")
+@click.pass_context
+def cli(ctx, home):
+    """Lab Memory - Local RAG system for lab reports."""
+    ctx.ensure_object(dict)
+    ctx.obj["home"] = home
 
 
 @cli.command()
@@ -36,13 +58,16 @@ def cli():
 @click.option("--output-dir", "-o", type=click.Path(), default=None, help="Output directory for extracted JSON")
 @click.option("--workers", "-w", type=int, default=None, help="Number of parallel workers")
 @click.option("--exclude", "-x", multiple=True, help="Exclude paths containing this pattern (case-insensitive)")
-def extract(input_dir: str, output_dir: str | None, workers: int | None, exclude: tuple[str, ...]):
+@click.pass_context
+def extract(ctx, input_dir: str, output_dir: str | None, workers: int | None, exclude: tuple[str, ...]):
     """Extract text from PPTX/PDF files."""
-    config = _load_config()
-    out = Path(output_dir) if output_dir else _resolve_path(config, "extracted_dir", "data/extracted")
+    home = _get_home(ctx)
+    config = _load_config(home)
+    out = Path(output_dir) if output_dir else _resolve_path(home, config, "extracted_dir", "data/extracted")
     in_path = Path(input_dir)
     exclude_list = list(exclude)
 
+    click.echo(f"Home: {home}")
     click.echo(f"Extracting from: {in_path}")
     click.echo(f"Output to: {out}")
     if exclude_list:
@@ -59,7 +84,6 @@ def extract(input_dir: str, output_dir: str | None, workers: int | None, exclude
         click.echo(f"  {err}", err=True)
 
     # Extract PDF files
-    import os
     from lab_memory.extract.pdf_extractor import extract_pdf_to_json
     exclude_lower = [p.lower() for p in exclude_list]
     pdf_files = sorted(
@@ -86,11 +110,13 @@ def extract(input_dir: str, output_dir: str | None, workers: int | None, exclude
 @click.option("--extracted-dir", "-e", type=click.Path(), default=None)
 @click.option("--chroma-dir", "-c", type=click.Path(), default=None)
 @click.option("--batch-size", "-b", type=int, default=64)
-def index(extracted_dir: str | None, chroma_dir: str | None, batch_size: int):
+@click.pass_context
+def index(ctx, extracted_dir: str | None, chroma_dir: str | None, batch_size: int):
     """Index extracted JSON files into ChromaDB."""
-    config = _load_config()
-    ext_dir = Path(extracted_dir) if extracted_dir else _resolve_path(config, "extracted_dir", "data/extracted")
-    chr_dir = Path(chroma_dir) if chroma_dir else _resolve_path(config, "chroma_dir", "data/chroma_db")
+    home = _get_home(ctx)
+    config = _load_config(home)
+    ext_dir = Path(extracted_dir) if extracted_dir else _resolve_path(home, config, "extracted_dir", "data/extracted")
+    chr_dir = Path(chroma_dir) if chroma_dir else _resolve_path(home, config, "chroma_dir", "data/chroma_db")
 
     model_name = config.get("embedding", {}).get("model_name", "intfloat/multilingual-e5-large")
     min_length = config.get("chunking", {}).get("min_chunk_length", 100)
@@ -147,15 +173,17 @@ def index(extracted_dir: str | None, chroma_dir: str | None, batch_size: int):
 @click.option("--workers", "-w", type=int, default=None)
 @click.option("--batch-size", "-b", type=int, default=64)
 @click.option("--exclude", "-x", multiple=True, help="Exclude paths containing this pattern (case-insensitive)")
-def ingest(input_dir: str, workers: int | None, batch_size: int, exclude: tuple[str, ...]):
+@click.pass_context
+def ingest(ctx, input_dir: str, workers: int | None, batch_size: int, exclude: tuple[str, ...]):
     """Extract and index in one step."""
-    import os
-    config = _load_config()
-    ext_dir = _resolve_path(config, "extracted_dir", "data/extracted")
-    chr_dir = _resolve_path(config, "chroma_dir", "data/chroma_db")
+    home = _get_home(ctx)
+    config = _load_config(home)
+    ext_dir = _resolve_path(home, config, "extracted_dir", "data/extracted")
+    chr_dir = _resolve_path(home, config, "chroma_dir", "data/chroma_db")
     exclude_list = list(exclude)
 
     # Step 1: Extract
+    click.echo(f"Home: {home}")
     click.echo("=== Phase 1: Extraction ===")
     if exclude_list:
         click.echo(f"Excluding: {exclude_list}")
@@ -229,11 +257,13 @@ def ingest(input_dir: str, workers: int | None, batch_size: int, exclude: tuple[
 @click.option("--date-from", type=str, default=None)
 @click.option("--date-to", type=str, default=None)
 @click.option("--type", "file_type", type=click.Choice(["pptx", "pdf"]), default=None)
-@click.option("--synthesize/--no-synthesize", default=False, help="Use Claude API to synthesize answer")
-def search(query: str, top_k: int, date_from: str | None, date_to: str | None, file_type: str | None, synthesize: bool):
+@click.option("--synthesize/--no-synthesize", default=False, help="Use Claude API to synthesize answer (requires ANTHROPIC_API_KEY)")
+@click.pass_context
+def search(ctx, query: str, top_k: int, date_from: str | None, date_to: str | None, file_type: str | None, synthesize: bool):
     """Search lab memory."""
-    config = _load_config()
-    chroma_dir = _resolve_path(config, "chroma_dir", "data/chroma_db")
+    home = _get_home(ctx)
+    config = _load_config(home)
+    chroma_dir = _resolve_path(home, config, "chroma_dir", "data/chroma_db")
     threshold = config.get("search", {}).get("score_threshold", 0.3)
 
     from lab_memory.query.retriever import retrieve, format_results
@@ -258,11 +288,15 @@ def search(query: str, top_k: int, date_from: str | None, date_to: str | None, f
 
 
 @cli.command()
-def stats():
+@click.pass_context
+def stats(ctx):
     """Show index statistics."""
-    config = _load_config()
-    chroma_dir = _resolve_path(config, "chroma_dir", "data/chroma_db")
-    ext_dir = _resolve_path(config, "extracted_dir", "data/extracted")
+    home = _get_home(ctx)
+    config = _load_config(home)
+    chroma_dir = _resolve_path(home, config, "chroma_dir", "data/chroma_db")
+    ext_dir = _resolve_path(home, config, "extracted_dir", "data/extracted")
+
+    click.echo(f"Home: {home}")
 
     # Extracted files
     json_files = list(ext_dir.glob("*.json")) if ext_dir.exists() else []
@@ -280,11 +314,42 @@ def stats():
 
 
 @cli.command()
-def serve():
+@click.pass_context
+def serve(ctx):
     """Start MCP server."""
     import asyncio
     from lab_memory.mcp_server import main
     asyncio.run(main())
+
+
+@cli.command()
+@click.argument("target_dir", type=click.Path())
+@click.pass_context
+def init(ctx, target_dir: str):
+    """Initialize a new lab-memory workspace with default config."""
+    target = Path(target_dir)
+    target.mkdir(parents=True, exist_ok=True)
+
+    # Create directory structure
+    (target / "data" / "raw").mkdir(parents=True, exist_ok=True)
+    (target / "data" / "extracted").mkdir(parents=True, exist_ok=True)
+    (target / "data" / "chroma_db").mkdir(parents=True, exist_ok=True)
+    (target / "configs").mkdir(parents=True, exist_ok=True)
+
+    # Copy default config
+    pkg_config = Path(__file__).parent.parent / "configs" / "settings.yaml"
+    dest_config = target / "configs" / "settings.yaml"
+    if not dest_config.exists() and pkg_config.exists():
+        dest_config.write_text(pkg_config.read_text(encoding="utf-8"), encoding="utf-8")
+
+    click.echo(f"Initialized lab-memory workspace at: {target}")
+    click.echo(f"  data/raw/         ← put your PPT/PDF files here")
+    click.echo(f"  data/extracted/   ← extracted JSON (auto-generated)")
+    click.echo(f"  data/chroma_db/   ← vector DB (auto-generated)")
+    click.echo(f"  configs/          ← settings.yaml")
+    click.echo(f"\nUsage:")
+    click.echo(f"  lab-memory --home {target} ingest {target / 'data' / 'raw'}")
+    click.echo(f"  lab-memory --home {target} search \"query\"")
 
 
 if __name__ == "__main__":

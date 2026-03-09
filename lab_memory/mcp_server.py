@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from mcp.server import Server
@@ -9,11 +10,18 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from lab_memory.query.retriever import retrieve, format_results
-from lab_memory.query.synthesizer import synthesize_answer
 from lab_memory.index.store import get_client, get_or_create_collection
 
-# Resolve paths relative to project root
-PROJECT_ROOT = Path(__file__).parent.parent
+
+def _resolve_home() -> Path:
+    """Resolve LAB_MEMORY_HOME (env var > project root)."""
+    env = os.environ.get("LAB_MEMORY_HOME")
+    if env:
+        return Path(env)
+    return Path(__file__).parent.parent
+
+
+PROJECT_ROOT = _resolve_home()
 CHROMA_DIR = PROJECT_ROOT / "data" / "chroma_db"
 EXTRACTED_DIR = PROJECT_ROOT / "data" / "extracted"
 
@@ -52,12 +60,12 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="summarize_topic",
-            description="Search lab memory and generate a comprehensive summary of a research topic using Claude API.",
+            description="Search lab memory broadly for a research topic and return all relevant excerpts. Claude Code will synthesize the summary from the returned sources.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "topic": {"type": "string", "description": "Research topic to summarize"},
-                    "top_k": {"type": "integer", "description": "Number of sources to use (default: 15)", "default": 15},
+                    "top_k": {"type": "integer", "description": "Number of sources to retrieve (default: 15)", "default": 15},
                 },
                 "required": ["topic"],
             },
@@ -143,12 +151,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if not results:
             return [TextContent(type="text", text="해당 주제에 대한 자료를 찾을 수 없습니다.")]
 
-        summary = synthesize_answer(
-            query=arguments["topic"],
-            results=results,
-            mode="summarize",
-        )
-        return [TextContent(type="text", text=summary)]
+        formatted = format_results(results, max_length=1000)
+        header = f"## Topic: {arguments['topic']}\n\nFound {len(results)} relevant sources.\n\n"
+        return [TextContent(type="text", text=header + formatted)]
 
     elif name == "list_reports":
         if not EXTRACTED_DIR.exists():
