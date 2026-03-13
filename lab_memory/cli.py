@@ -352,5 +352,117 @@ def init(ctx, target_dir: str):
     click.echo(f"  lab-memory --home {target} search \"query\"")
 
 
+@cli.group("workspace")
+@click.pass_context
+def workspace_group(ctx):
+    """Manage lab-memory workspaces (add/list/remove)."""
+    pass
+
+
+def _get_workspaces_path(ctx: click.Context) -> Path:
+    """Resolve workspaces.yaml path."""
+    home = _get_home(ctx)
+    config = _load_config(home)
+    ws_rel = config.get("workspaces_config", "configs/workspaces.yaml")
+    return home / ws_rel
+
+
+def _read_workspaces(ws_path: Path) -> dict[str, str]:
+    """Read workspaces from YAML file."""
+    if ws_path.exists():
+        data = yaml.safe_load(ws_path.read_text(encoding="utf-8")) or {}
+        return data.get("workspaces", {})
+    return {}
+
+
+def _write_workspaces(ws_path: Path, workspaces: dict[str, str]) -> None:
+    """Write workspaces to YAML file."""
+    ws_path.parent.mkdir(parents=True, exist_ok=True)
+    content = (
+        "# 워크스페이스 이름 → 홈 디렉토리 매핑\n"
+        "# lab-memory workspace add <name> <path> 로 관리\n"
+        "workspaces:\n"
+    )
+    for name, path in sorted(workspaces.items()):
+        content += f"  {name}: \"{path}\"\n"
+    ws_path.write_text(content, encoding="utf-8")
+
+
+@workspace_group.command("list")
+@click.pass_context
+def workspace_list(ctx):
+    """List registered workspaces."""
+    ws_path = _get_workspaces_path(ctx)
+    workspaces = _read_workspaces(ws_path)
+
+    if not workspaces:
+        click.echo("No workspaces registered.")
+        return
+
+    click.echo(f"Registered workspaces ({len(workspaces)}):")
+    for name, path in sorted(workspaces.items()):
+        exists = Path(path).exists()
+        status = "OK" if exists else "MISSING"
+        click.echo(f"  {name}: {path} [{status}]")
+
+
+@workspace_group.command("add")
+@click.argument("name")
+@click.argument("path", type=click.Path())
+@click.option("--init/--no-init", default=True, help="Auto-initialize workspace if directory does not exist")
+@click.pass_context
+def workspace_add(ctx, name: str, path: str, init: bool):
+    """Add a workspace. Optionally auto-initializes the directory."""
+    ws_path = _get_workspaces_path(ctx)
+    workspaces = _read_workspaces(ws_path)
+
+    abs_path = str(Path(path).resolve())
+
+    if name in workspaces:
+        click.echo(f"Workspace '{name}' already exists (path: {workspaces[name]}). Remove it first.")
+        return
+
+    # Auto-init if directory does not exist
+    target = Path(abs_path)
+    if init and not target.exists():
+        click.echo(f"Initializing workspace at {abs_path}...")
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "data" / "raw").mkdir(parents=True, exist_ok=True)
+        (target / "data" / "extracted").mkdir(parents=True, exist_ok=True)
+        (target / "data" / "chroma_db").mkdir(parents=True, exist_ok=True)
+        (target / "configs").mkdir(parents=True, exist_ok=True)
+
+        # Copy default config
+        pkg_config = Path(__file__).parent.parent / "configs" / "settings.yaml"
+        dest_config = target / "configs" / "settings.yaml"
+        if not dest_config.exists() and pkg_config.exists():
+            dest_config.write_text(pkg_config.read_text(encoding="utf-8"), encoding="utf-8")
+
+    workspaces[name] = abs_path
+    _write_workspaces(ws_path, workspaces)
+    click.echo(f"Added workspace '{name}' → {abs_path}")
+
+
+@workspace_group.command("remove")
+@click.argument("name")
+@click.pass_context
+def workspace_remove(ctx, name: str):
+    """Remove a workspace registration (does not delete files)."""
+    ws_path = _get_workspaces_path(ctx)
+    workspaces = _read_workspaces(ws_path)
+
+    if name == "default":
+        click.echo("Cannot remove the 'default' workspace.")
+        return
+
+    if name not in workspaces:
+        click.echo(f"Workspace '{name}' not found.")
+        return
+
+    del workspaces[name]
+    _write_workspaces(ws_path, workspaces)
+    click.echo(f"Removed workspace '{name}'. Files were not deleted.")
+
+
 if __name__ == "__main__":
     cli()

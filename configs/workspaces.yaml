@@ -1,0 +1,4 @@
+# 워크스페이스 이름 → 홈 디렉토리 매핑
+# lab-memory workspace add <name> <path> 로 관리
+workspaces:
+  default: "/mnt/d/_workspace/lab-memory"

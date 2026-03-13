@@ -129,19 +129,60 @@ lab-memory --home ~/my-lab stats
 lab-memory --home ~/my-lab extract ~/my-lab/data/raw/ -x "backup" -x "old"
 ```
 
-## 복수 워크스페이스
+## 멀티 워크스페이스
 
-프로젝트별로 독립된 RAG를 운영할 수 있다. 각 워크스페이스는 자체 데이터와 벡터 DB를 갖는다.
+단일 MCP 서버에서 여러 주제별 워크스페이스를 관리할 수 있다. 임베딩 모델(~1.3GB)을 한 번만 로드하므로 메모리 효율적이다.
+
+### CLI로 워크스페이스 관리
 
 ```bash
-lab-memory init ~/metabolic-eng     # 대사공학 프로젝트
-lab-memory init ~/synthetic-bio     # 합성생물학 프로젝트
+# 워크스페이스 등록 (디렉토리 없으면 자동 init)
+lab-memory workspace add metabolic ~/metabolic-eng
+lab-memory workspace add synbio ~/synthetic-bio
 
+# 등록된 워크스페이스 목록
+lab-memory workspace list
+
+# 워크스페이스 제거 (파일은 삭제하지 않음)
+lab-memory workspace remove synbio
+```
+
+각 워크스페이스에 독립적으로 데이터를 인덱싱한다:
+
+```bash
 lab-memory --home ~/metabolic-eng ingest ~/metabolic-eng/data/raw/
 lab-memory --home ~/synthetic-bio ingest ~/synthetic-bio/data/raw/
+```
 
+### MCP에서 워크스페이스 전환
+
+MCP 도구에 `workspace` 파라미터를 전달하면 해당 워크스페이스에서 검색한다:
+
+```
+search_lab_notes(query="ALE 실험", workspace="metabolic")
+search_lab_notes(query="genetic circuit", workspace="synbio")
+list_workspaces()  # 등록된 모든 워크스페이스와 청크 수 확인
+```
+
+`workspace`를 생략하면 `"default"` 워크스페이스를 사용한다 (하위 호환).
+
+### 워크스페이스 설정 파일
+
+`configs/workspaces.yaml`에 이름→경로 매핑이 저장된다:
+
+```yaml
+workspaces:
+  default: "/mnt/d/_workspace/lab-memory"
+  metabolic: "/home/user/metabolic-eng"
+  synbio: "/home/user/synthetic-bio"
+```
+
+### 기존 방식 (--home)
+
+기존의 `--home` 플래그도 그대로 사용 가능하다:
+
+```bash
 lab-memory --home ~/metabolic-eng search "flux balance analysis"
-lab-memory --home ~/synthetic-bio search "genetic circuit"
 ```
 
 매번 `--home`을 쓰기 번거로우면 환경변수로 지정할 수 있다:
@@ -181,11 +222,12 @@ lab-memory search "query"    # --home 없이 사용 가능
 
 | 도구 | 설명 |
 |------|------|
-| `search_lab_notes` | 키워드/의미 기반 검색. 한국어·영어 모두 가능 |
+| `search_lab_notes` | 키워드/의미 기반 검색. 한국어·영어 모두 가능. `workspace` 파라미터로 워크스페이스 지정 |
 | `get_slide` | 특정 슬라이드 원문 전체 조회 |
 | `summarize_topic` | 주제 관련 소스를 넓게 수집. Claude Code가 종합 요약 |
 | `list_reports` | 인덱싱된 레포트 목록 조회 (날짜 필터 가능) |
 | `get_report_summary` | 개별 레포트의 슬라이드 구성 확인 |
+| `list_workspaces` | 등록된 워크스페이스 목록과 청크 수 조회 |
 
 ### 수동 실행 (디버깅용)
 

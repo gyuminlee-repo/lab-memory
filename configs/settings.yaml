@@ -22,3 +22,5 @@ extraction:
 
 mcp:
   server_name: "lab-memory"
+
+workspaces_config: "configs/workspaces.yaml"
